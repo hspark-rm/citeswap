@@ -1,0 +1,52 @@
+# v* 태그를 올리면 macOS(Apple Silicon·Intel)와 Windows 용 설치 파일을 만들어 Release 에 올린다.
+# 수동 실행(workflow_dispatch)은 Release 없이 빌드 결과만 Artifacts 로 남긴다.
+name: build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            asset: CiteSwap-mac-apple-silicon.dmg
+          - os: macos-15-intel
+            asset: CiteSwap-mac-intel.dmg
+          - os: windows-latest
+            asset: CiteSwap-windows.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -r requirements.txt pytest
+      - name: Test
+        run: python -m pytest -q tests
+      - name: Build
+        run: pyinstaller --noconfirm citeswap.spec
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: hdiutil create -volname CiteSwap -srcfolder dist/CiteSwap.app -ov -format UDZO "${{ matrix.asset }}"
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        # Compress-Archive(PowerShell 5.1)는 ZIP 안 경로를 '\' 로 써서 다른 프로그램에서 깨질 수 있다 — zipfile 을 쓴다
+        run: python -m zipfile -c "${{ matrix.asset }}" dist/CiteSwap
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}
